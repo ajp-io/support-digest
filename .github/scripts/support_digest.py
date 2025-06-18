@@ -9,7 +9,7 @@ LABEL = "product::embedded-cluster"
 
 def gather_deltas(gh, since):
     """Collect comments & state changes in the past 24 h *plus* static issue context."""
-    query = f'label:"{LABEL}" org:{ORG} updated:>{since.isoformat()}'
+    query = f'is:issue label:"{LABEL}" org:{ORG} updated:>{since.isoformat()}'
     issues = gh.search_issues(query, sort="updated", order="asc")
     deltas = []
 
