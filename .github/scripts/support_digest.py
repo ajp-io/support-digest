@@ -85,7 +85,7 @@ def summarize(deltas, since):
 def main():
     print("[DEBUG] Starting support digest script")
     gh    = Github(os.environ["GH_TOKEN"])
-    since = datetime.datetime.utcnow() - datetime.timedelta(hours=24)
+    since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=24)
     deltas = gather_deltas(gh, since)
 
     if deltas:
