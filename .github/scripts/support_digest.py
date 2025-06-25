@@ -9,8 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ORG   = "replicated-collab"
-# LABELS = ["product::embedded-cluster", "product::kots", "product::kurl"]
-LABELS = ["product::kots"]
+LABELS = ["product::embedded-cluster", "product::kots", "product::kurl"]
 
 # East Coast timezone
 EAST_COAST_TZ = ZoneInfo("America/New_York")
