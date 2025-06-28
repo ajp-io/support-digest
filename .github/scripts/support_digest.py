@@ -160,13 +160,13 @@ def has_meaningful_activity(delta):
     return False
 
 
-def summarize_issue(issue, section_type):
+def summarize_issue(issue, issue_category):
     """Summarize an issue for its section"""
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
     
     content = json.dumps({
         "issue": issue,
-        "section_type": section_type
+        "issue_category": issue_category
     }, ensure_ascii=False)
     
     prompt = f"""
@@ -175,7 +175,7 @@ def summarize_issue(issue, section_type):
     Input payload (JSON, provided as the user message):
       • `issue`  - metadata & full body text
       • `events` - ONLY comments / label or assignee changes that occurred inside the time-window
-      • `section_type` - one of "newly_opened", "updated", or "closed"
+      • `issue_category` - one of "newly_opened", "updated", or "closed"
 
     General output rules
     --------------------
@@ -195,7 +195,7 @@ def summarize_issue(issue, section_type):
     - Customer replies or expectations set
     - Notes from any support calls that occurred
 
-    Additional items by **section_type**
+    Additional items by **issue_category**
     ------------------------------------
     ★ newly_opened
       - Customer / tenant & severity (Sev-1/2/3)
@@ -241,19 +241,19 @@ def summarize_issue(issue, section_type):
         return f"• <{issue['url']}|{issue['repo']}#{issue['number']}> · *{issue['title']}* — [Summarization failed]"
 
 
-def process_issues_parallel(issues, section_type, max_workers=10):
+def process_issues_parallel(issues, issue_category, max_workers=10):
     """Process multiple issues in parallel"""
     if not issues:
         return []
     
-    print(f"[DEBUG] Processing {len(issues)} {section_type} issues in parallel...")
+    print(f"[DEBUG] Processing {len(issues)} {issue_category} issues in parallel...")
     start_time = time.time()
     
     summaries = []
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_issue = {
-            executor.submit(summarize_issue, issue, section_type): issue 
+            executor.submit(summarize_issue, issue, issue_category): issue 
             for issue in issues
         }
         
@@ -268,7 +268,7 @@ def process_issues_parallel(issues, section_type, max_workers=10):
                 print(f"[ERROR] Failed to process {issue['repo']}#{issue['number']}: {e}")
     
     elapsed = time.time() - start_time
-    print(f"[DEBUG] Completed {len(summaries)}/{len(issues)} {section_type} issues in {elapsed:.1f}s")
+    print(f"[DEBUG] Completed {len(summaries)}/{len(issues)} {issue_category} issues in {elapsed:.1f}s")
     
     return summaries
 
