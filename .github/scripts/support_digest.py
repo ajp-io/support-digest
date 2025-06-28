@@ -273,7 +273,7 @@ def process_issues_parallel(issues, issue_category, max_workers=10):
     return summaries
 
 
-def build_digest(newly_opened, updated, closed, since, hours_back):
+def build_digest(newly_opened, updated, closed):
     """Build the complete digest from categorized issues"""
     sections = []
     
@@ -330,7 +330,7 @@ def summarize(deltas, since, hours_back, product_label=None):
     newly_opened, updated, closed = categorize_issues(deltas, since)
     
     # Build digest with parallel processing
-    summary = build_digest(newly_opened, updated, closed, since, hours_back)
+    summary = build_digest(newly_opened, updated, closed)
     
     # Format header
     header = format_header(since, hours_back, product_label)
