@@ -1,4 +1,5 @@
-import os, json, datetime, textwrap
+import os, json, datetime, textwrap, time
+import concurrent.futures
 from zoneinfo import ZoneInfo
 from github import Github
 from slack_sdk.webhook import WebhookClient
@@ -9,211 +10,293 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ORG   = "replicated-collab"
-LABELS = ["product::embedded-cluster", "product::kots", "product::kurl"]
+
+# Product configuration - single source of truth
+PRODUCTS = {
+    "product::embedded-cluster": "Embedded Cluster",
+    "product::kots": "KOTS", 
+    "product::kurl": "kURL"
+}
 
 # East Coast timezone
 EAST_COAST_TZ = ZoneInfo("America/New_York")
 
 
-def gather_deltas(gh, since):
-    print(f"[DEBUG] Gathering deltas since {since.isoformat()}")
-    all_deltas = []
-    
-    for label in LABELS:
-        print(f"[DEBUG] Checking issues with label: {label}")
-        query = f'is:issue label:"{label}" org:{ORG} updated:>{since.isoformat()}'
-        issues = gh.search_issues(query, sort="updated", order="asc")
-        deltas = []
-
-        issue_count = 0
-        for issue in issues:
-            issue_count += 1
-            # ------- always‑included static context -------
-            meta = {
-                "title": issue.title,
-                "number": issue.number,
-                "repo": issue.repository.name,
-                "labels": [l.name for l in issue.labels],
-                "body": (issue.body or ""),
-                "url": issue.html_url,
-                "created_at": issue.created_at.isoformat(),
-                "updated_at": issue.updated_at.isoformat(),
-                "state": issue.state,
-                "product_label": label,  # Add the product label for context
-            }
-
-            # ------- dynamic events -------
-            events = []
-            
-            # Check for new comments in the time window
-            for c in issue.get_comments(since):
-                events.append({
-                    "type": "comment",
-                    "author": c.user.login,
-                    "body": c.body,
-                    "created_at": c.created_at.isoformat(),
-                })
-
-            # Check for state changes in the time window
-            # We need to get the issue timeline to see state changes
-            try:
-                for event in issue.get_timeline():
-                    if hasattr(event, 'event') and event.event == 'closed' and event.created_at >= since:
-                        events.append({
-                            "type": "state_change",
-                            "state": "closed",
-                            "created_at": event.created_at.isoformat(),
-                        })
-                    elif hasattr(event, 'event') and event.event == 'reopened' and event.created_at >= since:
-                        events.append({
-                            "type": "state_change",
-                            "state": "reopened",
-                            "created_at": event.created_at.isoformat(),
-                        })
-            except Exception as e:
-                print(f"[DEBUG] Error getting timeline for issue {issue.number}: {e}")
-
-            # Filter out issues where the only updates were by github-actions bot
-            if events:
-                # Check if all events are from github-actions bot
-                # Only comment events have an author field, state changes don't
-                comment_events = [event for event in events if event.get("type") == "comment"]
-                state_change_events = [event for event in events if event.get("type") == "state_change"]
-                
-                # If there are state change events, we should include the issue (state changes are meaningful)
-                if state_change_events:
-                    deltas.append({**meta, "events": events})
-                # If there are only comment events, check if they're all from github-actions bot
-                elif comment_events:
-                    all_github_actions_comments = all(
-                        event.get("author") == "github-actions[bot]" 
-                        for event in comment_events
-                    )
-                    
-                    # If all comments are from github-actions bot, skip this issue
-                    if all_github_actions_comments:
-                        print(f"[DEBUG] Skipping issue {issue.number} - only github-actions bot comments")
-                        continue
-                    
-                    deltas.append({**meta, "events": events})
-                else:
-                    # Fallback case - include the issue
-                    deltas.append({**meta, "events": events})
-
-        print(f"[DEBUG] Retrieved {issue_count} issues for {label}, {len(deltas)} with deltas.")
-        all_deltas.extend(deltas)
-    
-    print(f"[DEBUG] Total deltas across all labels: {len(all_deltas)}")
-    return all_deltas
-
-
-def summarize(deltas, since, hours_back):
-    print(f"[DEBUG] Summarizing deltas ({len(deltas)} issues)")
-    client  = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    
-    # Add the since timestamp to the data for the AI to use
-    data_with_since = {
-        "since_timestamp": since.isoformat(),
-        "deltas": deltas
+def fetch_issue_data(issue, since, product_label):
+    """Fetch all data for a single issue (comments, metadata)"""
+    # ------- always‑included static context -------
+    meta = {
+        "title": issue.title,
+        "number": issue.number,
+        "repo": issue.repository.name,
+        "labels": [l.name for l in issue.labels],
+        "body": (issue.body or ""),
+        "url": issue.html_url,
+        "created_at": issue.created_at.isoformat(),
+        "updated_at": issue.updated_at.isoformat(),
+        "state": issue.state,
+        "product_label": product_label,
     }
-    content = json.dumps(data_with_since, ensure_ascii=False)
+
+    # ------- dynamic events -------
+    events = []
     
-    prompt  = textwrap.dedent(f"""
-        You are *Support Digest Bot* for Replicated's **installers** (Embedded Cluster and KOTS).
+    # Check for new comments in the time window
+    try:
+        for c in issue.get_comments(since):
+            events.append({
+                "type": "comment",
+                "author": c.user.login,
+                "body": c.body,
+                "created_at": c.created_at.isoformat(),
+            })
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch comments for {issue.repository.name}#{issue.number}: {e}")
+        # Continue with empty events rather than failing completely
 
-        INPUT
-        • A JSON object containing:
-          - since_timestamp: the start of the delta window (ISO timestamp)
-          - deltas: array of issue objects, each containing:
-            - title        : issue title (string)
-            - number       : issue number (int)
-            - repo         : repository name (string)
-            - url          : HTML link (string)
-            - labels       : array of label strings
-            - body         : original issue body (string, may be long)
-            - created_at   : when the issue was created (ISO timestamp)
-            - updated_at   : when the issue was last updated (ISO timestamp)
-            - state        : current state ("open" or "closed")
-            - product_label: the product label ("product::embedded-cluster" or "product::kots")
-            - events       : array of delta events (only since last digest)
-                  • For "comment" events:  author, body, created_at
-                  • For "state_change" events:  state ("closed" or "reopened"), created_at
-
-        TASK
-        Produce a **Slack-ready markdown** digest with three sections:
-
-        *Newly Opened Issues*  
-         • For every issue that was **created** in this delta window (created_at >= since_timestamp) list a bullet:  
-           `• <url|repo#number> · *title*` — followed by a **thorough** synopsis (no hard length cap).  
-           Include: problem description, environment, commands tried, workarounds, blockers, and any **feature gap / bug** you detect.  
-           If the conversation shows that a **new bug or feature-request issue was opened** (look for a GitHub link plus words like
-           "opened", "created", "filed"), mention it inline:  
-           `   ↳ Bug opened: <linked-url|#id> · **title**` or  
-           `   ↳ Feature request: <linked-url|#id> · **title**`.
-           Prefix possible gaps with `⚠️ Potential product gap:`.  
-           Quote exact commands or code blocks using triple back-ticks when helpful.
-           **Indicate the product** (Embedded Cluster or KOTS) at the beginning of each bullet.
-
-        *Updated Issues*  
-         • Bullet for each issue that was **created before** this delta window but has **comment events** or **state changes** in the delta.  
-           Begin the same way (`• <url|repo#number> · *title*`).  
-           Summarize **only the new comments and state changes**, weaving in title/labels/body for context.  
-           If any comment indicates a fresh bug or feature issue was filed, append an indented line with the same
-           `↳ Bug opened:` / `↳ Feature request:` pattern and link.
-           Explain new insights, progress, workarounds, next steps.  
-           **IMPORTANT**: If an issue has any comment events or state_change events, it MUST be included in this section.
-           Skip issues whose only changes were label edits (no comments or state changes).
-           **Indicate the product** (Embedded Cluster or KOTS) at the beginning of each bullet.
-
-        *Closed Issues*  
-         • Bullet for each issue that transitioned to *closed* in the delta (has a "state_change" event with state "closed").  
-           Format: `• <url|repo#number> · *title* — Closed · <reason or closing comment>`.
-           **Indicate the product** (Embedded Cluster or KOTS) at the beginning of each bullet.
-
-        STYLE & RULES
-        1. Use Slack markdown: `*bold*`, `_italic_`, ```code```, and triple-back-tick blocks.  
-        2. Links **must** use Slack inline format: `<url|repo#number>`.  
-        3. Be as detailed as needed; no summary length limit.  
-        4. GitHub handles are fine to include as plain text (e.g., `octocat`), **but do not use Slack @-mentions or `<@U123>` syntax**.  
-        5. When linking bug/feature issues, always use Slack inline link format `<url|#number>`; keep the "↳" prefix so these call-outs stand out.
-        6. If an issue body is too long for context, include only the portions essential to understand the problem.  
-        7. Preserve Unicode bullets and clear indentation for readability.  
-        8. Return **only** the digest text—no extra headings, metadata, or commentary.
-        9. **CRITICAL**: Use the created_at timestamp to determine if an issue is "newly opened" vs "updated". Only issues created within the delta window should go in "Newly Opened Issues".
-        10. **CRITICAL**: Every issue with comment events or state_change events MUST be included in the appropriate section. Do not skip any issues that have events.
-        11. **CRITICAL**: Start each bullet with the product indicator: `[Embedded Cluster]` or `[KOTS]` followed by the rest of the bullet.
-        12. If a category (new, updated, closed) is empty, do not include it in the output.
-
-        OUTPUT EXAMPLE (follow this structure exactly)
-
-        *Replicated Installers Support Digest* (past 24h - since 2025-06-24 12:00 ET)
-
-        *Newly Opened Issues*  
-        • [Embedded Cluster] <https://github.com/org/repo/issues/123|progress-replicated#123> · *Install fails on SELinux* — The installer errors on …  
-         Workaround tried:  
-         ```bash
-         setenforce 0
-         ```  
-         ⚠️ Potential product gap: SELinux-aware install path …
-
-        • [KOTS] <https://github.com/org/repo/issues/124|kots-repo#124> · *Application deployment fails* — The KOTS application fails to deploy with …
-
-        *Updated Issues*  
-        • [Embedded Cluster] <https://github.com/org/repo/issues/99|acme-corp#99> · *Preflight check timeout* — New comment indicates …  
-
-        *Closed Issues*  
-        • [KOTS] <https://github.com/org/repo/issues/87|tech-startup#87> · *CI pipeline hangs* — Closed · Fixed in v1.2.3
-    """)
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": content},
-        ],
-    )
-    summary = resp.choices[0].message.content.strip()
-    print(f"[DEBUG] OpenAI summary: {summary[:1000]}...")
+    # Check if issue was created within the time window
+    issue_created_in_window = issue.created_at >= since
     
+    # Include issues that either:
+    # 1. Were created within the time window (newly opened issues)
+    # 2. Have events (comments) in the time window
+    if issue_created_in_window or events:
+        if issue_created_in_window:
+            print(f"[DEBUG] Including issue {issue.repository.name}#{issue.number} - newly created in time window")
+        else:
+            print(f"[DEBUG] Including issue {issue.repository.name}#{issue.number} - has comments")
+        return {**meta, "events": events}
+    else:
+        print(f"[DEBUG] Issue {issue.repository.name}#{issue.number} has no events in time window and was not created in time window")
+        return None
+
+
+def gather_deltas(gh, since, product_label):
+    print(f"[DEBUG] Gathering deltas since {since.isoformat()}")
+    print(f"[DEBUG] Processing product: {product_label}")
+    
+    print(f"[DEBUG] Checking issues with label: {product_label}")
+    query = f'is:issue label:"{product_label}" label:"kind::inbound-escalation" org:{ORG} updated:>{since.isoformat()}'
+    issues = gh.search_issues(query, sort="updated", order="asc")
+    
+    # Convert generator to list to get total count
+    issues_list = list(issues)
+    print(f"[DEBUG] Found {len(issues_list)} issues to process for {product_label}")
+    
+    if not issues_list:
+        return []
+    
+    # Process issues in parallel
+    deltas = []
+    max_workers = min(10, len(issues_list))  # Cap at 10 workers or number of issues
+    
+    print(f"[DEBUG] Processing {len(issues_list)} issues with {max_workers} workers...")
+    start_time = time.time()
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all issue processing tasks
+        future_to_issue = {
+            executor.submit(fetch_issue_data, issue, since, product_label): issue 
+            for issue in issues_list
+        }
+        
+        # Collect results as they complete
+        for future in concurrent.futures.as_completed(future_to_issue):
+            issue = future_to_issue[future]
+            try:
+                result = future.result()
+                if result is not None:
+                    deltas.append(result)
+                    print(f"[DEBUG] ✓ Completed {issue.repository.name}#{issue.number}")
+            except Exception as e:
+                print(f"[ERROR] Failed to process {issue.repository.name}#{issue.number}: {e}")
+    
+    elapsed = time.time() - start_time
+    print(f"[DEBUG] Completed processing {len(deltas)}/{len(issues_list)} issues in {elapsed:.1f}s")
+    
+    return deltas
+
+
+def categorize_issues(deltas, since):
+    """
+    Simple categorization:
+    1. Closed - Issue is currently closed
+    2. Newly Opened - Created in time window (and not closed)
+    3. Updated - Has meaningful activity in time window (and not closed, not newly opened)
+    4. Skip - Everything else
+    """
+    closed = []
+    newly_opened = []
+    updated = []
+    skipped_count = 0
+    
+    for delta in deltas:
+        # Filter out issues that only have bot comments
+        if not has_meaningful_activity(delta) and not delta.get("created_at") >= since.isoformat():
+            print(f"[DEBUG] {delta['repo']}#{delta['number']} → SKIPPED (only bot comments)")
+            skipped_count += 1
+            continue
+            
+        if delta.get("state") == "closed":
+            closed.append(delta)
+            print(f"[DEBUG] {delta['repo']}#{delta['number']} → CLOSED")
+        elif delta.get("created_at") >= since.isoformat():
+            newly_opened.append(delta)
+            print(f"[DEBUG] {delta['repo']}#{delta['number']} → NEWLY OPENED")
+        elif has_meaningful_activity(delta):
+            updated.append(delta)
+            print(f"[DEBUG] {delta['repo']}#{delta['number']} → UPDATED")
+    
+    print(f"[DEBUG] Categorization: {len(newly_opened)} new, {len(updated)} updated, {len(closed)} closed, {skipped_count} skipped")
+    return newly_opened, updated, closed
+
+
+def has_meaningful_activity(delta):
+    """Check if issue has non-bot comments"""
+    for event in delta.get("events", []):
+        if event.get("type") == "comment":
+            if event.get("author") != "github-actions[bot]":
+                return True
+    return False
+
+
+def summarize_issue(issue, section_type):
+    """Summarize an issue for its section"""
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    
+    content = json.dumps({
+        "issue": issue,
+        "section_type": section_type
+    }, ensure_ascii=False)
+    
+    prompt = f"""
+    You are a support-engineering assistant summarizing a GitHub issues for a Slack digest.
+
+    Input payload (JSON, provided as the user message):
+      • `issue`  - metadata & full body text
+      • `events` - ONLY comments / label or assignee changes that occurred inside the time-window
+      • `section_type` - one of "newly_opened", "updated", or "closed"
+
+    General output rules
+    --------------------
+    • Produce ONE Slack-formatted bullet:
+          • <URL|repo#number> · *title* — <summary>
+    • Use concise, active-voice fragments; ignore bot noise.
+    • Be as detailed as needed—no token limit worries.
+    • Quote logs/errors in ``` blocks when helpful.
+
+    Checklist for **ALL** issues
+    ----------------------------
+    - **One-sentence problem statement**
+    - Minimal repro steps (if present)
+    - Key log line / error snippet (``` … ```)
+    - Any workaround tried or suggested
+    - Suspected root cause or product gap
+    - Customer replies or expectations set
+    - Notes from any support calls that occurred
+
+    Additional items by **section_type**
+    ------------------------------------
+    ★ newly_opened
+      - Customer / tenant & severity (Sev-1/2/3)
+      - Environment (product & version, OS/K8s, etc.)
+
+    ★ updated
+      - What changed in this window (new comments, labels, PR links)
+      - Decisions made or config changes applied
+      - Progress state (e.g. needs a support bundle, waiting on customer reply, etc.)
+      - New blockers or unanswered questions—flag clearly
+      - Severity / priority changes
+
+    ★ closed
+      - Resolution type (fix, docs change, won't-fix, duplicate, etc.)
+      - Confirmed root cause (one sentence)
+      - Details on any workarounds tried or suggested
+      - Who verified and how (customer confirmed, CI, etc.)
+      - PR / commit link that closed it
+      - Follow-up tickets or backports opened
+      - Docs / KB updates
+      - Total time-to-resolution (hours / days open)
+
+    Example (Slack Markdown)
+    ------------------------
+    • <https://github.com/replicated-collab/progress-replicated/issues/123|embedded-cluster#123> · *Cannot install on SELinux-enabled RHEL 9.3* — Sev-2 for AcmeCo. RHEL 9.3, Embedded Cluster v1.8.0. Preflight `selinux_config` fails with `permission denied`. Repro: fresh node, SELinux=enforcing, run install. No workaround yet. Suspect container-runtime policy gap. Owner: @alex-smith.
+
+    (For **updated** and **closed** issues, swap in the relevant checklist items above.)
+"""
+    
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": content},
+            ],
+            max_tokens=1000,
+            timeout=30,
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"[ERROR] Failed to summarize {issue['repo']}#{issue['number']}: {e}")
+        return f"• <{issue['url']}|{issue['repo']}#{issue['number']}> · *{issue['title']}* — [Summarization failed]"
+
+
+def process_issues_parallel(issues, section_type, max_workers=10):
+    """Process multiple issues in parallel"""
+    if not issues:
+        return []
+    
+    print(f"[DEBUG] Processing {len(issues)} {section_type} issues in parallel...")
+    start_time = time.time()
+    
+    summaries = []
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_issue = {
+            executor.submit(summarize_issue, issue, section_type): issue 
+            for issue in issues
+        }
+        
+        for future in concurrent.futures.as_completed(future_to_issue):
+            issue = future_to_issue[future]
+            try:
+                summary = future.result()
+                if summary:
+                    summaries.append(summary)
+                    print(f"[DEBUG] ✓ Completed {issue['repo']}#{issue['number']}")
+            except Exception as e:
+                print(f"[ERROR] Failed to process {issue['repo']}#{issue['number']}: {e}")
+    
+    elapsed = time.time() - start_time
+    print(f"[DEBUG] Completed {len(summaries)}/{len(issues)} {section_type} issues in {elapsed:.1f}s")
+    
+    return summaries
+
+
+def build_digest(newly_opened, updated, closed, since, hours_back):
+    """Build the complete digest from categorized issues"""
+    sections = []
+    
+    if newly_opened:
+        new_summaries = process_issues_parallel(newly_opened, "newly_opened")
+        if new_summaries:
+            sections.append(f"*Newly Opened Issues*\n" + "\n".join(new_summaries))
+    
+    if updated:
+        updated_summaries = process_issues_parallel(updated, "updated")
+        if updated_summaries:
+            sections.append(f"*Updated Issues*\n" + "\n".join(updated_summaries))
+    
+    if closed:
+        closed_summaries = process_issues_parallel(closed, "closed")
+        if closed_summaries:
+            sections.append(f"*Closed Issues*\n" + "\n".join(closed_summaries))
+    
+    return "\n\n".join(sections)
+
+
+def format_header(since, hours_back, product_label=None):
+    """Format the digest header"""
     # Format the time window description
     if hours_back == 24:
         time_desc = "past 24h"
@@ -230,15 +313,34 @@ def summarize(deltas, since, hours_back):
     # Convert UTC time to East Coast time for display
     since_east_coast = since.astimezone(EAST_COAST_TZ)
     
+    # Determine product name for the header
+    product_name = PRODUCTS.get(product_label, "Unknown")
     header = (
-        f"*Replicated Installers Support Digest* "
+        f"*{product_name} Support Digest* "
         f"({time_desc} – since {since_east_coast:%Y-%m-%d %H:%M ET})"
     )
+    return header
+
+
+def summarize(deltas, since, hours_back, product_label=None):
+    """New summarize function using categorization and parallel processing"""
+    print(f"[DEBUG] Summarizing deltas ({len(deltas)} issues)")
+    
+    # Categorize issues using simple Python logic
+    newly_opened, updated, closed = categorize_issues(deltas, since)
+    
+    # Build digest with parallel processing
+    summary = build_digest(newly_opened, updated, closed, since, hours_back)
+    
+    # Format header
+    header = format_header(since, hours_back, product_label)
+    
     return f"{header}\n\n{summary}"
 
 
-def main():
-    print("[DEBUG] Starting support digest script")
+def run_for_product(product_label):
+    """Run the support digest for a single product"""
+    print(f"[DEBUG] Starting support digest script for {product_label}")
     
     # Get configurable time window (default 24 hours)
     hours_back = int(os.environ.get("HOURS_BACK", "24"))
@@ -246,10 +348,10 @@ def main():
     
     gh    = Github(os.environ["GH_TOKEN"])
     since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours_back)
-    deltas = gather_deltas(gh, since)
+    deltas = gather_deltas(gh, since, product_label)
 
     if deltas:
-        text = summarize(deltas, since, hours_back)
+        text = summarize(deltas, since, hours_back, product_label)
         print(f"[DEBUG] Sending to Slack: {text[:1000]}...")
         
         # Check for dry run mode
@@ -260,7 +362,25 @@ def main():
             resp = WebhookClient(os.environ["SLACK_WEBHOOK_URL"]).send(text=text)
             print(f"[DEBUG] Slack response: {resp.status_code} {resp.body}")
     else:
-        print("[DEBUG] No deltas to report.")
+        print(f"[DEBUG] No deltas to report for {product_label}.")
+
+
+def main():
+    print("[DEBUG] Starting support digest script")
+    
+    # Check if a specific product is requested
+    product_label = os.environ.get("PRODUCT_LABEL")
+    
+    if product_label:
+        # Run for a single product
+        run_for_product(product_label)
+    else:
+        # Run for all products separately
+        print("[DEBUG] Running support digest for all products separately")
+        for label in PRODUCTS:
+            print(f"\n[DEBUG] ===== Processing {label} =====")
+            run_for_product(label)
+            print(f"[DEBUG] ===== Completed {label} =====\n")
 
 
 if __name__ == "__main__":

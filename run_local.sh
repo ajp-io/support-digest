@@ -1,3 +1,3 @@
 #!/bin/bash
 cd .github/scripts
-python support_digest.py 
+python3 support_digest.py 
