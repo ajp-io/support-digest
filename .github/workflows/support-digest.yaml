@@ -5,8 +5,8 @@ on:
     - cron:  '0 19 * * *'   # daily
   workflow_dispatch:
     inputs:
-      product_label:
-        description: 'Product label to process (optional)'
+      product_shortname:
+        description: 'Product shortname to process (optional, e.g., kots, ec, kurl)'
         required: false
 
 jobs:
@@ -25,5 +25,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          PRODUCT_LABEL: ${{ github.event.inputs.product_label }}
-        run: python support_digest.py
+        run: |
+          if [ -n "${{ github.event.inputs.product_shortname }}" ]; then
+            python support_digest.py ${{ github.event.inputs.product_shortname }}
+          else
+            python support_digest.py
+          fi
