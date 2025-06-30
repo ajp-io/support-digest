@@ -38,36 +38,42 @@ def fetch_issue_data(issue, since, product_label):
         "product_label": product_label,
     }
 
-    # ------- dynamic events -------
-    events = []
+    # ------- all comments with time markers -------
+    all_comments = []
     
-    # Check for new comments in the time window
     try:
-        for c in issue.get_comments(since):
-            events.append({
+        # Get all comments for complete context
+        comments = issue.get_comments()
+        
+        for c in comments:
+            is_recent_activity = c.created_at >= since
+            all_comments.append({
                 "type": "comment",
                 "author": c.user.login,
                 "body": c.body,
                 "created_at": c.created_at.isoformat(),
+                "is_recent_activity": is_recent_activity,  # True if in time window, False otherwise
             })
     except Exception as e:
         print(f"[ERROR] Failed to fetch comments for {issue.repository.name}#{issue.number}: {e}")
-        # Continue with empty events rather than failing completely
+        # Continue with empty comments rather than failing completely
 
     # Check if issue was created within the time window
     issue_created_in_window = issue.created_at >= since
     
     # Include issues that either:
     # 1. Were created within the time window (newly opened issues)
-    # 2. Have events (comments) in the time window
-    if issue_created_in_window or events:
+    # 2. Have recent activity (comments) in the time window
+    has_recent_activity = any(c.get("is_recent_activity") for c in all_comments)
+    
+    if issue_created_in_window or has_recent_activity:
         if issue_created_in_window:
             print(f"[DEBUG] Including issue {issue.repository.name}#{issue.number} - newly created in time window")
         else:
-            print(f"[DEBUG] Including issue {issue.repository.name}#{issue.number} - has comments")
-        return {**meta, "events": events}
+            print(f"[DEBUG] Including issue {issue.repository.name}#{issue.number} - has recent activity")
+        return {**meta, "comments": all_comments}
     else:
-        print(f"[DEBUG] Issue {issue.repository.name}#{issue.number} has no events in time window and was not created in time window")
+        print(f"[DEBUG] Issue {issue.repository.name}#{issue.number} has no recent activity and was not created in time window")
         return None
 
 
@@ -152,10 +158,10 @@ def categorize_issues(deltas, since):
 
 
 def has_meaningful_activity(delta):
-    """Check if issue has non-bot comments"""
-    for event in delta.get("events", []):
-        if event.get("type") == "comment":
-            if event.get("author") != "github-actions[bot]":
+    """Check if issue has non-bot comments in recent activity"""
+    for comment in delta.get("comments", []):
+        if comment.get("type") == "comment" and comment.get("is_recent_activity"):
+            if comment.get("author") != "github-actions[bot]":
                 return True
     return False
 
@@ -174,8 +180,14 @@ def summarize_issue(issue, issue_category):
 
     Input payload (JSON, provided as the user message):
       • `issue`  - metadata & full body text
-      • `events` - ONLY comments / label or assignee changes that occurred inside the time-window
+      • `comments` - ALL comments with `is_recent_activity` flag indicating what's new
       • `issue_category` - one of "newly_opened", "updated", or "closed"
+
+    Context usage:
+    - Use ALL comments to understand the full conversation flow and issue history
+    - Focus your summary on what changed in the recent time window (comments with `is_recent_activity: true`)
+    - Reference relevant context from older comments when explaining recent activity
+    - For "updated" issues, explain what the recent activity means in context of the overall issue progression
 
     General output rules
     --------------------
@@ -187,7 +199,7 @@ def summarize_issue(issue, issue_category):
 
     Checklist for **ALL** issues
     ----------------------------
-    - **One-sentence problem statement**
+    - **One-sentence problem statement** (from issue body or early comments)
     - Minimal repro steps (if present)
     - Key log line / error snippet (``` … ```)
     - Any workaround tried or suggested
@@ -203,6 +215,7 @@ def summarize_issue(issue, issue_category):
 
     ★ updated
       - What changed in this window (new comments, labels, PR links)
+      - How this fits into the overall issue progression
       - Decisions made or config changes applied
       - Progress state (e.g. needs a support bundle, waiting on customer reply, etc.)
       - New blockers or unanswered questions—flag clearly
@@ -220,7 +233,7 @@ def summarize_issue(issue, issue_category):
 
     Example (Slack Markdown)
     ------------------------
-    • <https://github.com/replicated-collab/progress-replicated/issues/123|embedded-cluster#123> · *Cannot install on SELinux-enabled RHEL 9.3* — Sev-2 for AcmeCo. RHEL 9.3, Embedded Cluster v1.8.0. Preflight `selinux_config` fails with `permission denied`. Repro: fresh node, SELinux=enforcing, run install. No workaround yet. Suspect container-runtime policy gap. Owner: @alex-smith.
+    • <https://github.com/replicated-collab/progress-replicated/issues/123|embedded-cluster#123> · *Cannot install on SELinux-enabled RHEL 9.3* — Issue where Embedded Cluster fails to install because Local Artifact Mirror fails to start. RHEL 9.3, Embedded Cluster v1.8.0. Preflight `selinux_config` fails with `permission denied`. Repro: fresh node, SELinux=enforcing, run install. No workaround yet. Suspect container-runtime policy gap.
 
     (For **updated** and **closed** issues, swap in the relevant checklist items above.)
 """
@@ -329,6 +342,11 @@ def summarize(deltas, since, hours_back, product_label=None):
     # Categorize issues using simple Python logic
     newly_opened, updated, closed = categorize_issues(deltas, since)
     
+    # Check if any issues will be summarized
+    total_issues = len(newly_opened) + len(updated) + len(closed)
+    if total_issues == 0:
+        return None  # Signal no content
+    
     # Build digest with parallel processing
     summary = build_digest(newly_opened, updated, closed)
     
@@ -352,6 +370,12 @@ def run_for_product(product_label):
 
     if deltas:
         text = summarize(deltas, since, hours_back, product_label)
+        
+        # Check if summarize returned None (no issues to report)
+        if text is None:
+            print(f"[DEBUG] No issues to report for {product_label} after filtering - skipping Slack message")
+            return
+        
         print(f"[DEBUG] Sending to Slack: {text[:1000]}...")
         
         # Check for dry run mode
