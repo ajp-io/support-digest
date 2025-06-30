@@ -1,0 +1,29 @@
+name: Support Digest
+
+on:
+  schedule:
+    - cron:  '0 19 * * *'   # daily
+  workflow_dispatch:
+    inputs:
+      product_label:
+        description: 'Product label to process (optional)'
+        required: false
+
+jobs:
+  run-digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Run digest
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PRODUCT_LABEL: ${{ github.event.inputs.product_label }}
+        run: python support_digest.py
