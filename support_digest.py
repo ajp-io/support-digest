@@ -36,22 +36,19 @@ def get_config():
                             "name": "Embedded Cluster",
                             "display_name": "Embedded Cluster",
                             "github_org": "replicated-collab",
-                            "issue_labels": ["kind::inbound-escalation"],
-                            "slack_channel": "#support-embedded-cluster"
+                            "issue_labels": ["kind::inbound-escalation"]
                         },
                         "product::kots": {
                             "name": "KOTS", 
                             "display_name": "KOTS",
                             "github_org": "replicated-collab",
-                            "issue_labels": ["kind::inbound-escalation"],
-                            "slack_channel": "#support-kots"
+                            "issue_labels": ["kind::inbound-escalation"]
                         },
                         "product::kurl": {
                             "name": "kURL",
                             "display_name": "kURL", 
                             "github_org": "replicated-collab",
-                            "issue_labels": ["kind::inbound-escalation"],
-                            "slack_channel": "#support-kurl"
+                            "issue_labels": ["kind::inbound-escalation"]
                         }
                     }
                 }
@@ -185,6 +182,9 @@ def summarize_issue(issue, issue_category):
     """Summarize an issue for its section"""
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
     
+    # Pre-format the Slack link with the correct repo name
+    slack_link = f"<{issue['url']}|{issue['repo']}#{issue['number']}>"
+    
     content = json.dumps({
         "issue": issue,
         "issue_category": issue_category
@@ -207,10 +207,11 @@ def summarize_issue(issue, issue_category):
     General output rules
     --------------------
     • Produce ONE Slack-formatted bullet:
-          • <URL|repo#number> · *title* — <summary>
+          • {slack_link} · *title* — <summary>
     • Use concise, active-voice fragments; ignore bot noise.
     • Be as detailed as needed—no token limit worries.
     • Quote logs/errors in ``` blocks when helpful.
+    • DO NOT change the repo name or issue number - use exactly what's provided in the link above.
 
     Checklist for **ALL** issues
     ----------------------------
@@ -248,7 +249,7 @@ def summarize_issue(issue, issue_category):
 
     Example (Slack Markdown)
     ------------------------
-    • <https://github.com/replicated-collab/progress-replicated/issues/123|embedded-cluster#123> · *Cannot install on SELinux-enabled RHEL 9.3* — Issue where Embedded Cluster fails to install because Local Artifact Mirror fails to start. RHEL 9.3, Embedded Cluster v1.8.0. Preflight `selinux_config` fails with `permission denied`. Repro: fresh node, SELinux=enforcing, run install. No workaround yet. Suspect container-runtime policy gap.
+    • <https://github.com/replicated-collab/progress-replicated/issues/123|progress-replicated#123> · *Cannot install on SELinux-enabled RHEL 9.3* — Issue where Embedded Cluster fails to install because Local Artifact Mirror fails to start. RHEL 9.3, Embedded Cluster v1.8.0. Preflight `selinux_config` fails with `permission denied`. Repro: fresh node, SELinux=enforcing, run install. No workaround yet. Suspect container-runtime policy gap.
 
     (For **updated** and **closed** issues, swap in the relevant checklist items above.)
 """
@@ -265,7 +266,7 @@ def summarize_issue(issue, issue_category):
         return resp.choices[0].message.content.strip()
     except Exception as e:
         print(f"[ERROR] Failed to summarize {issue['repo']}#{issue['number']}: {e}")
-        return f"• <{issue['url']}|{issue['repo']}#{issue['number']}> · *{issue['title']}* — [Summarization failed]"
+        return f"• {slack_link} · *{issue['title']}* — [Summarization failed]"
 
 def format_header(since, hours_back, product_label=None):
     """Format the digest header"""
