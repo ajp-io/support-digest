@@ -133,35 +133,33 @@ When manually triggering the workflow, you can optionally specify a product shor
 
 ## Architecture
 
-The script processes GitHub issues through several stages:
+The script processes GitHub issues through a consolidated discovery and filtering approach:
 
-### 1. Issue Discovery
-- Queries GitHub API for issues with specified labels within the time window
-- Searches across all repositories in configured organizations
-- Uses GitHub's search API with filters for `updated:>timestamp`
+### 1. Consolidated Issue Discovery & Filtering
+- **GitHub API Queries**: Uses two precise searches to minimize false positives:
+  - `created:>timestamp` for newly opened issues
+  - `updated:>timestamp` for recently updated issues
+- **Label Filtering**: Only includes issues with all required product and support labels
+- **Bot Activity Filtering**: Excludes issues that only have bot comments (e.g., `github-actions[bot]`)
+- **Efficient Data Fetching**: Only fetches comments for issues that pass initial filtering
 
-### 2. Issue Filtering
-- **Bot Comment Filtering**: Excludes issues that only have bot comments (e.g., `github-actions[bot]`)
-- **Time Window Filtering**: Only includes issues created or updated within the specified time window
-- **Label Filtering**: Only includes issues with all required labels
-
-### 3. Issue Categorization
+### 2. Issue Categorization
 Issues are categorized into three types:
 - **Newly Opened**: Created within the time window
-- **Updated**: Has new non-bot comments within the time window
+- **Updated**: Has new non-bot comments within the time window  
 - **Closed**: Currently closed (regardless of when closed)
 
-### 4. Parallel Processing
+### 3. Parallel Processing
 - Each product is processed independently to avoid context window limitations
 - Issues within each product are processed in parallel (configurable via `max_workers`)
-- Each issue's comments are fetched and analyzed for recent activity
+- Each issue's comments are analyzed for recent meaningful activity
 
-### 5. AI Summarization
+### 4. AI Summarization
 - Each issue is summarized using OpenAI's API
-- The prompt includes the full issue context and recent activity
+- The prompt includes the full issue context and recent activity, with AI summaries focusing on recent comments but using the whole issue history for context
 - Summaries are formatted for Slack with GitHub links and issue numbers
 
-### 6. Error Handling
+### 5. Error Handling
 - Individual issue failures don't stop processing of other issues
 - Fallback to basic issue information if AI summarization fails
 - Timeout handling for OpenAI API calls (30 seconds)

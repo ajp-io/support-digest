@@ -138,19 +138,30 @@ def gather_deltas(gh, since, product_label):
     label_query = ' '.join(label_queries)
     
     print(f"[DEBUG] Checking issues with labels: {all_labels}")
-    query = f'is:issue {label_query} org:{org_name} updated:>{since.isoformat()}'
-    issues = gh.search_issues(query, sort="updated", order="asc")
     
-    # Convert generator to list to get total count
-    issues_list = list(issues)
-    print(f"[DEBUG] Found {len(issues_list)} issues to process for {product_label}")
+    # Use more precise GitHub search to reduce false positives
+    # Search for issues created OR updated in the time window
+    created_query = f'is:issue {label_query} org:{org_name} created:>{since.isoformat()}'
+    updated_query = f'is:issue {label_query} org:{org_name} updated:>{since.isoformat()}'
+    
+    # Get both newly created and recently updated issues
+    created_issues = list(gh.search_issues(created_query, sort="created", order="desc"))
+    updated_issues = list(gh.search_issues(updated_query, sort="updated", order="desc"))
+    
+    # Combine and deduplicate issues
+    all_issues = {}
+    for issue in created_issues + updated_issues:
+        all_issues[f"{issue.repository.name}#{issue.number}"] = issue
+    
+    issues_list = list(all_issues.values())
+    print(f"[DEBUG] Found {len(issues_list)} candidate issues for {product_label}")
     
     if not issues_list:
         return []
     
-    # Process issues in parallel
+    # Process issues in parallel with consolidated filtering
     deltas = []
-    max_workers = min(get_max_workers(), len(issues_list))  # Cap at configured max workers or number of issues
+    max_workers = min(get_max_workers(), len(issues_list))
     
     print(f"[DEBUG] Processing {len(issues_list)} issues with {max_workers} workers...")
     start_time = time.time()
@@ -158,7 +169,7 @@ def gather_deltas(gh, since, product_label):
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all issue processing tasks
         future_to_issue = {
-            executor.submit(fetch_issue_data, issue, since, product_label): issue 
+            executor.submit(process_issue_with_filtering, issue, since, product_label): issue 
             for issue in issues_list
         }
         
@@ -177,6 +188,69 @@ def gather_deltas(gh, since, product_label):
     print(f"[DEBUG] Completed processing {len(deltas)}/{len(issues_list)} issues in {elapsed:.1f}s")
     
     return deltas
+
+def process_issue_with_filtering(issue, since, product_label):
+    """Process a single issue with consolidated filtering logic"""
+    # GitHub API already filtered by time window, so we can trust the timestamps
+    issue_created_in_window = issue.created_at >= since
+    issue_updated_in_window = issue.updated_at >= since
+    
+    # Fetch issue metadata
+    meta = {
+        "title": issue.title,
+        "number": issue.number,
+        "repo": issue.repository.name,
+        "labels": [l.name for l in issue.labels],
+        "body": (issue.body or ""),
+        "url": issue.html_url,
+        "created_at": issue.created_at.isoformat(),
+        "updated_at": issue.updated_at.isoformat(),
+        "state": issue.state,
+        "product_label": product_label,
+    }
+    
+    # Only fetch comments if we need them (issue was updated or we need to check for recent activity)
+    all_comments = []
+    has_recent_activity = False
+    
+    if issue_updated_in_window:
+        try:
+            comments = issue.get_comments()
+            for c in comments:
+                is_recent_activity = c.created_at >= since
+                if is_recent_activity:
+                    has_recent_activity = True
+                
+                all_comments.append({
+                    "type": "comment",
+                    "author": c.user.login,
+                    "body": c.body,
+                    "created_at": c.created_at.isoformat(),
+                    "is_recent_activity": is_recent_activity,
+                })
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch comments for {issue.repository.name}#{issue.number}: {e}")
+    
+    # Apply filtering logic
+    if issue_created_in_window:
+        # Newly created issues are always included
+        print(f"[DEBUG] Including {issue.repository.name}#{issue.number} - newly created")
+        return {**meta, "comments": all_comments}
+    elif has_recent_activity and has_meaningful_activity_from_comments(all_comments):
+        # Updated issues with meaningful recent activity
+        print(f"[DEBUG] Including {issue.repository.name}#{issue.number} - has meaningful recent activity")
+        return {**meta, "comments": all_comments}
+    else:
+        # Filter out issues with only bot activity or no recent activity
+        print(f"[DEBUG] Skipping {issue.repository.name}#{issue.number} - no meaningful recent activity")
+        return None
+
+def has_meaningful_activity_from_comments(comments):
+    """Check if comments contain meaningful (non-bot) recent activity"""
+    for comment in comments:
+        if comment.get("is_recent_activity") and comment.get("author") != "github-actions[bot]":
+            return True
+    return False
 
 def summarize_issue(issue, issue_category):
     """Summarize an issue for its section"""
@@ -387,135 +461,6 @@ def main():
             run_for_product(label)
             print(f"[DEBUG] ===== Completed {label} =====\n")
 
-def fetch_issue_data(issue, since, product_label):
-    """Fetch all data for a single issue (comments, metadata)"""
-    # ------- always‑included static context -------
-    meta = {
-        "title": issue.title,
-        "number": issue.number,
-        "repo": issue.repository.name,
-        "labels": [l.name for l in issue.labels],
-        "body": (issue.body or ""),
-        "url": issue.html_url,
-        "created_at": issue.created_at.isoformat(),
-        "updated_at": issue.updated_at.isoformat(),
-        "state": issue.state,
-        "product_label": product_label,
-    }
-
-    # ------- all comments with time markers -------
-    all_comments = []
-    
-    try:
-        # Get all comments for complete context
-        comments = issue.get_comments()
-        
-        for c in comments:
-            is_recent_activity = c.created_at >= since
-            all_comments.append({
-                "type": "comment",
-                "author": c.user.login,
-                "body": c.body,
-                "created_at": c.created_at.isoformat(),
-                "is_recent_activity": is_recent_activity,  # True if in time window, False otherwise
-            })
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch comments for {issue.repository.name}#{issue.number}: {e}")
-        # Continue with empty comments rather than failing completely
-
-    # Check if issue was created within the time window
-    issue_created_in_window = issue.created_at >= since
-    
-    # Include issues that either:
-    # 1. Were created within the time window (newly opened issues)
-    # 2. Have recent activity (comments) in the time window
-    has_recent_activity = any(c.get("is_recent_activity") for c in all_comments)
-    
-    if issue_created_in_window or has_recent_activity:
-        if issue_created_in_window:
-            print(f"[DEBUG] Including issue {issue.repository.name}#{issue.number} - newly created in time window")
-        else:
-            print(f"[DEBUG] Including issue {issue.repository.name}#{issue.number} - has recent activity")
-        return {**meta, "comments": all_comments}
-    else:
-        print(f"[DEBUG] Issue {issue.repository.name}#{issue.number} has no recent activity and was not created in time window")
-        return None
-
-def categorize_issues(deltas, since):
-    """
-    Simple categorization:
-    1. Closed - Issue is currently closed
-    2. Newly Opened - Created in time window (and not closed)
-    3. Updated - Has meaningful activity in time window (and not closed, not newly opened)
-    4. Skip - Everything else
-    """
-    closed = []
-    newly_opened = []
-    updated = []
-    skipped_count = 0
-    
-    for delta in deltas:
-        # Filter out issues that only have bot comments
-        if not has_meaningful_activity(delta) and not delta.get("created_at") >= since.isoformat():
-            print(f"[DEBUG] {delta['repo']}#{delta['number']} → SKIPPED (only bot comments)")
-            skipped_count += 1
-            continue
-            
-        if delta.get("state") == "closed":
-            closed.append(delta)
-            print(f"[DEBUG] {delta['repo']}#{delta['number']} → CLOSED")
-        elif delta.get("created_at") >= since.isoformat():
-            newly_opened.append(delta)
-            print(f"[DEBUG] {delta['repo']}#{delta['number']} → NEWLY OPENED")
-        elif has_meaningful_activity(delta):
-            updated.append(delta)
-            print(f"[DEBUG] {delta['repo']}#{delta['number']} → UPDATED")
-    
-    print(f"[DEBUG] Categorization: {len(newly_opened)} new, {len(updated)} updated, {len(closed)} closed, {skipped_count} skipped")
-    return newly_opened, updated, closed
-
-def has_meaningful_activity(delta):
-    """Check if issue has non-bot comments in recent activity"""
-    for comment in delta.get("comments", []):
-        if comment.get("type") == "comment" and comment.get("is_recent_activity"):
-            if comment.get("author") != "github-actions[bot]":
-                return True
-    return False
-
-def process_issues_parallel(issues, issue_category, max_workers=None):
-    """Process multiple issues in parallel"""
-    if not issues:
-        return []
-    
-    if max_workers is None:
-        max_workers = get_max_workers()
-    
-    print(f"[DEBUG] Processing {len(issues)} {issue_category} issues in parallel...")
-    start_time = time.time()
-    
-    summaries = []
-    
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_issue = {
-            executor.submit(summarize_issue, issue, issue_category): issue 
-            for issue in issues
-        }
-        
-        for future in concurrent.futures.as_completed(future_to_issue):
-            issue = future_to_issue[future]
-            try:
-                summary = future.result()
-                if summary:
-                    summaries.append(summary)
-                    print(f"[DEBUG] ✓ Completed {issue['repo']}#{issue['number']}")
-            except Exception as e:
-                print(f"[ERROR] Failed to process {issue['repo']}#{issue['number']}: {e}")
-    
-    elapsed = time.time() - start_time
-    print(f"[DEBUG] Completed {len(summaries)}/{len(issues)} {issue_category} issues in {elapsed:.1f}s")
-    
-    return summaries
-
 def build_digest(newly_opened, updated, closed):
     """Build the complete digest from categorized issues"""
     sections = []
@@ -556,6 +501,66 @@ def summarize(deltas, since, hours_back, product_label=None):
     header = format_header(since, hours_back, product_label)
     
     return f"{header}\n\n{summary}"
+
+def categorize_issues(deltas, since):
+    """
+    Categorize pre-filtered issues:
+    1. Closed - Issue is currently closed
+    2. Newly Opened - Created in time window (and not closed)
+    3. Updated - Has meaningful activity in time window (and not closed, not newly opened)
+    """
+    closed = []
+    newly_opened = []
+    updated = []
+    
+    for delta in deltas:
+        # Issues are already pre-filtered, so we just categorize them
+        if delta.get("state") == "closed":
+            closed.append(delta)
+            print(f"[DEBUG] {delta['repo']}#{delta['number']} → CLOSED")
+        elif delta.get("created_at") >= since.isoformat():
+            newly_opened.append(delta)
+            print(f"[DEBUG] {delta['repo']}#{delta['number']} → NEWLY OPENED")
+        else:
+            updated.append(delta)
+            print(f"[DEBUG] {delta['repo']}#{delta['number']} → UPDATED")
+    
+    print(f"[DEBUG] Categorization: {len(newly_opened)} new, {len(updated)} updated, {len(closed)} closed")
+    return newly_opened, updated, closed
+
+def process_issues_parallel(issues, issue_category, max_workers=None):
+    """Process multiple issues in parallel"""
+    if not issues:
+        return []
+    
+    if max_workers is None:
+        max_workers = get_max_workers()
+    
+    print(f"[DEBUG] Processing {len(issues)} {issue_category} issues in parallel...")
+    start_time = time.time()
+    
+    summaries = []
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_issue = {
+            executor.submit(summarize_issue, issue, issue_category): issue 
+            for issue in issues
+        }
+        
+        for future in concurrent.futures.as_completed(future_to_issue):
+            issue = future_to_issue[future]
+            try:
+                summary = future.result()
+                if summary:
+                    summaries.append(summary)
+                    print(f"[DEBUG] ✓ Completed {issue['repo']}#{issue['number']}")
+            except Exception as e:
+                print(f"[ERROR] Failed to process {issue['repo']}#{issue['number']}: {e}")
+    
+    elapsed = time.time() - start_time
+    print(f"[DEBUG] Completed {len(summaries)}/{len(issues)} {issue_category} issues in {elapsed:.1f}s")
+    
+    return summaries
 
 if __name__ == "__main__":
     main() 
