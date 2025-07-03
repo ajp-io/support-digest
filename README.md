@@ -149,13 +149,13 @@ Issues are categorized into three types:
 - **Updated**: Has new non-bot comments within the time window  
 - **Closed**: Currently closed (regardless of when closed)
 
-### 3. Parallel Processing
+### 3. GitHub Issue Processing
 - Each product is processed independently to avoid context window limitations
-- Issues within each product are processed in parallel (configurable via `max_workers`)
+- GitHub issues within each product are processed in parallel (configurable via `max_workers`)
 - Each issue's comments are analyzed for recent meaningful activity
 
 ### 4. AI Summarization
-- Each issue is summarized using OpenAI's API
+- Each issue is summarized using OpenAI's API in parallel (using the same `max_workers` configuration)
 - The prompt includes the full issue context and recent activity, with AI summaries focusing on recent comments but using the whole issue history for context
 - Summaries are formatted for Slack with GitHub links and issue numbers
 
