@@ -135,7 +135,7 @@ When manually triggering the workflow, you can optionally specify a product shor
 
 The script processes GitHub issues through a consolidated discovery and filtering approach:
 
-### 1. Consolidated Issue Discovery & Filtering
+### 1. Issue Discovery & Filtering
 - **GitHub API Queries**: Uses two precise searches to minimize false positives:
   - `created:>timestamp` for newly opened issues
   - `updated:>timestamp` for recently updated issues
