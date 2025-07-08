@@ -37,6 +37,12 @@
           "shortname": "kurl",
           "github_org": "replicated-collab",
           "issue_labels": ["kind::inbound-escalation"]
+        },
+        "product::troubleshoot": {
+          "name": "Troubleshoot",
+          "shortname": "troubleshoot",
+          "github_org": "replicated-collab",
+          "issue_labels": ["kind::inbound-escalation"]
         }
       }
     }

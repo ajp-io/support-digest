@@ -68,6 +68,7 @@ The script supports any products configured in `config.json`. By default, it inc
 - **KOTS** (shortname: `kots`)
 - **kURL** (shortname: `kurl`) 
 - **Embedded Cluster** (shortname: `ec`)
+- **Troubleshoot** (shortname: `troubleshoot`)
 
 ## Usage
 

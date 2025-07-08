@@ -98,6 +98,7 @@ pip install -r requirements.txt
    ./run_product.sh kots
    ./run_product.sh ec
    ./run_product.sh kurl
+   ./run_product.sh troubleshoot
    ```
    Or directly:
    ```bash
