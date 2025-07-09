@@ -287,6 +287,14 @@ def summarize_issue(issue, issue_category):
     • Quote logs/errors in ``` blocks when helpful.
     • DO NOT change the repo name or issue number - use exactly what's provided in the link above.
 
+    Issue linking requirements
+    -------------------------
+    • Link to follow-up issues: If a bug report, feature request, or any follow-up issue was created, mention and link it using Slack format: <https://github.com/org/repo/issues/123|repo#123>
+    • Link mentioned issues: When any issue is mentioned in the summary (e.g., "issue #45", "#123", "related to issue 67"), convert it to a proper Slack link: <https://github.com/org/repo/issues/45|repo#45>
+    • Use the same repo name as the current issue unless explicitly stated otherwise
+    • For cross-repo references, use the full repo name in the link text
+    • If the exact repo isn't specified, assume same repo as current issue
+
     Checklist for **ALL** issues
     ----------------------------
     - **One-sentence problem statement** (from issue body or early comments)
@@ -296,12 +304,15 @@ def summarize_issue(issue, issue_category):
     - Suspected root cause or product gap
     - Customer replies or expectations set
     - Notes from any support calls that occurred
+    - **Follow-up issues created** (bug reports, feature requests, etc.) - MUST be linked
+    - **Related issues mentioned** - MUST be linked
 
     Additional items by **issue_category**
     ------------------------------------
     ★ newly_opened
       - Customer / tenant & severity (Sev-1/2/3)
       - Environment (product & version, OS/K8s, etc.)
+      - Any follow-up issues already created
 
     ★ updated
       - What changed in this window (new comments, labels, PR links)
@@ -310,6 +321,7 @@ def summarize_issue(issue, issue_category):
       - Progress state (e.g. needs a support bundle, waiting on customer reply, etc.)
       - New blockers or unanswered questions—flag clearly
       - Severity / priority changes
+      - Follow-up issues created during this update
 
     ★ closed
       - Resolution type (fix, docs change, won't-fix, duplicate, etc.)
@@ -317,13 +329,13 @@ def summarize_issue(issue, issue_category):
       - Details on any workarounds tried or suggested
       - Who verified and how (customer confirmed, CI, etc.)
       - PR / commit link that closed it
-      - Follow-up tickets or backports opened
+      - Follow-up issues created - MUST be linked
       - Docs / KB updates
       - Total time-to-resolution (hours / days open)
 
     Example (Slack Markdown)
     ------------------------
-    • <https://github.com/replicated-collab/progress-replicated/issues/123|progress-replicated#123> · *Cannot install on SELinux-enabled RHEL 9.3* — Issue where Embedded Cluster fails to install because Local Artifact Mirror fails to start. RHEL 9.3, Embedded Cluster v1.8.0. Preflight `selinux_config` fails with `permission denied`. Repro: fresh node, SELinux=enforcing, run install. No workaround yet. Suspect container-runtime policy gap.
+    • <https://github.com/replicated-collab/progress-replicated/issues/123|progress-replicated#123> · *Cannot install on RHEL 9.3* — Issue where Embedded Cluster fails to install because Local Artifact Mirror fails to start. RHEL 9.3, Embedded Cluster v1.8.0. Logs indicate that Local Artifact Mirror failed to start because of SELinux. Customer put SELinux in permissive mode and the install succeeded. Feature request to support SELinux in enforcing mode: <https://github.com/replicated-collab/progress-replicated/issues/45|progress-replicated#45>.
 
     (For **updated** and **closed** issues, swap in the relevant checklist items above.)
 """
