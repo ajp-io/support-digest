@@ -333,9 +333,13 @@ def summarize_issue(issue, issue_category):
       - Docs / KB updates
       - Total time-to-resolution (hours / days open)
 
-    Example (Slack Markdown)
-    ------------------------
+    Examples (Slack Markdown)
+    -------------------------
+    # Example with follow-up issue (when one is actually mentioned/created):
     • <https://github.com/replicated-collab/progress-replicated/issues/123|progress-replicated#123> · *Cannot install on RHEL 9.3* — Issue where Embedded Cluster fails to install because Local Artifact Mirror fails to start. RHEL 9.3, Embedded Cluster v1.8.0. Logs indicate that Local Artifact Mirror failed to start because of SELinux. Customer put SELinux in permissive mode and the install succeeded. Feature request to support SELinux in enforcing mode: <https://github.com/replicated-collab/progress-replicated/issues/45|progress-replicated#45>.
+
+    # Example without follow-up issue (when none are mentioned/created):
+    • <https://github.com/replicated-collab/itrs-replicated/issues/456|itrs-replicated#456> · *KOTS fails to start on Ubuntu 22.04* — Customer reports KOTS application fails to start with "connection refused" error. Ubuntu 22.04, KOTS v1.95.0. Logs show port 8800 already in use. Customer confirmed no other KOTS instances running. Suggested checking for conflicting services on port 8800.
 
     (For **updated** and **closed** issues, swap in the relevant checklist items above.)
 """
