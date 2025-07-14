@@ -287,8 +287,10 @@ def summarize_issue(issue, issue_category):
     • Quote logs/errors in ``` blocks when helpful.
     • DO NOT change the repo name or issue number - use exactly what's provided in the link above.
 
-    Issue linking requirements
-    -------------------------
+    Link formatting requirements
+    --------------------------
+    • ALWAYS convert any URL to a Slack hyperlink format: <url|descriptive text>
+    • Never paste raw URLs in the summary text
     • Link to follow-up issues: If a bug report, feature request, or any follow-up issue was created, mention and link it using Slack format: <https://github.com/org/repo/issues/123|repo#123>
     • Link mentioned issues: When any issue is mentioned in the summary (e.g., "issue #45", "#123", "related to issue 67"), convert it to a proper Slack link: <https://github.com/org/repo/issues/45|repo#45>
     • Use the same repo name as the current issue unless explicitly stated otherwise
