@@ -466,7 +466,7 @@ def main():
     # Accept shortname or product label as a command-line argument
     product_arg = sys.argv[1] if len(sys.argv) > 1 else None
     # Check if a specific product is requested
-    product_label = product_arg or os.environ.get("PRODUCT_LABEL")
+    product_label = product_arg or os.environ.get("PRODUCT_SHORTNAME")
     if product_label:
         # Run for a single product (label or shortname)
         run_for_product(product_label)
