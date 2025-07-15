@@ -7,9 +7,9 @@ from openai import OpenAI
 from dotenv import load_dotenv
 
 # Load environment variables from .env file for local development
-load_dotenv()
+# This will be called later to avoid conflicts with team-specific environments
 
-def load_config(config_path="config.json"):
+def load_config(config_path="config.installers.json"):
     """Load configuration from JSON file"""
     try:
         with open(config_path, 'r') as f:
@@ -21,9 +21,14 @@ def load_config(config_path="config.json"):
         print(f"[ERROR] Invalid JSON in configuration file: {e}")
         return None
 
+def get_config_path():
+    """Get config file path from environment variable or default"""
+    return os.environ.get("CONFIG_FILE", "config.installers.json")
+
 def get_config():
     """Get configuration with fallback to environment variables"""
-    config = load_config()
+    config_path = get_config_path()
+    config = load_config(config_path)
     if not config:
         # Fallback to original hardcoded values
         print("[WARNING] Using fallback configuration")
@@ -450,10 +455,11 @@ def run_for_product(product_label_or_shortname):
             print("DRY RUN MODE - Not sending to Slack")
             print(f"Summary:\n{text}")
         else:
-            # Use product-specific webhook if configured, otherwise use default
-            webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
+            # Use product-specific webhook environment variable, otherwise fall back to default
+            product_webhook_env = f"SLACK_WEBHOOK_{product_config.get('shortname', '').upper()}"
+            webhook_url = os.environ.get(product_webhook_env) or os.environ.get("SLACK_WEBHOOK_URL")
             if not webhook_url:
-                print("[ERROR] SLACK_WEBHOOK_URL not set")
+                print(f"[ERROR] No webhook URL found for product {product_label}. Set {product_webhook_env} or SLACK_WEBHOOK_URL")
                 return
             
             resp = WebhookClient(webhook_url).send(text=text)
@@ -463,6 +469,9 @@ def run_for_product(product_label_or_shortname):
 
 def main():
     print("[DEBUG] Starting support digest script")
+    
+    # Load .env file only if no team-specific environment is set
+    config_file = os.environ.get("CONFIG_FILE", "config.installers.json")
     # Accept shortname or product label as a command-line argument
     product_arg = sys.argv[1] if len(sys.argv) > 1 else None
     # Check if a specific product is requested

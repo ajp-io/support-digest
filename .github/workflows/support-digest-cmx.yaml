@@ -1,0 +1,34 @@
+name: Support Digest - Compatibility Matrix Team
+
+on:
+  schedule:
+    - cron:  '0 19 * * *'   # daily
+  workflow_dispatch:
+    inputs:
+      product_shortname:
+        description: 'Product shortname to process (optional, e.g., cmx)'
+        required: false
+
+jobs:
+  run-digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Run digest
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_CMX }}
+          CONFIG_FILE: config.cmx.json
+        run: |
+          if [ -n "${{ github.event.inputs.product_shortname }}" ]; then
+            python support_digest.py ${{ github.event.inputs.product_shortname }}
+          else
+            python support_digest.py
+          fi 

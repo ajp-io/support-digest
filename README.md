@@ -13,9 +13,25 @@ The support digest script monitors GitHub issues across configured organizations
 
 For detailed setup instructions, see [SETUP.md](SETUP.md).
 
+### Configuration Validation
+
+Before running the digest, validate your team's configuration:
+
+```bash
+# Validate a specific team
+python3 validate_config.py installers
+python3 validate_config.py vendex
+python3 validate_config.py compatibility-matrix
+
+# List available teams
+python3 validate_config.py --list
+```
+
+This validates your configuration, GitHub access, and environment setup.
+
 ## Configuration
 
-The script is fully configurable through a JSON configuration file (`config.json`). This allows different teams to easily set up their own products without modifying the code.
+The script is fully configurable through a team-specific JSON configuration file. This allows different teams to easily set up their own products without modifying the code.
 
 ### Configuration Structure
 
@@ -59,16 +75,41 @@ The script is fully configurable through a JSON configuration file (`config.json
 - `timezone`: Timezone for displaying timestamps
 - `max_workers`: Maximum parallel workers for processing issues
 - `openai_model`: OpenAI model to use for summarization
-- `github_action_schedule`: Cron schedule for GitHub Actions (optional, defaults to daily at 7:00 PM UTC)
 
-## Products Supported
+## Teams and Products Supported
 
-The script supports any products configured in `config.json`. By default, it includes:
+The repository supports multiple teams with separate workflows and configurations. Each team has their own:
 
-- **KOTS** (shortname: `kots`)
-- **kURL** (shortname: `kurl`) 
-- **Embedded Cluster** (shortname: `ec`)
-- **Troubleshoot** (shortname: `troubleshoot`)
+- **Configuration file** (e.g., `config.installers.json`)
+- **GitHub Actions workflow** (e.g., `support-digest-installers.yaml`)
+- **Slack webhook** (stored as GitHub secret)
+
+### Installers Team
+- **Configuration**: `config.installers.json`
+- **Workflow**: `support-digest-installers.yaml`
+- **Webhook Secret**: `SLACK_WEBHOOK_INSTALLERS`
+- **Products**:
+  - **KOTS** (shortname: `kots`)
+  - **kURL** (shortname: `kurl`) 
+  - **Embedded Cluster** (shortname: `ec`)
+  - **Troubleshoot** (shortname: `troubleshoot`)
+
+### Vendor Experience Team
+- **Configuration**: `config.vendex.json`
+- **Workflow**: `support-digest-vendex.yaml`
+- **Webhook Secret**: `SLACK_WEBHOOK_VENDEX`
+- **Products**:
+  - **Vendor Portal** (shortname: `vp`)
+  - **Replicated SDK** (shortname: `sdk`)
+  - **Helm CLI** (shortname: `helm`)
+  - **Download Portal** (shortname: `dp`)
+
+### Compatibility Matrix Team
+- **Configuration**: `config.cmx.json`
+- **Workflow**: `support-digest-cmx.yaml`
+- **Webhook Secret**: `SLACK_WEBHOOK_CMX`
+- **Products**:
+  - **Compatibility Matrix** (shortname: `cmx`)
 
 ## Usage
 
@@ -79,7 +120,13 @@ The script supports any products configured in `config.json`. By default, it inc
 This runs the digest for all configured products separately:
 
 ```bash
+# Run installers team (default)
 ./run_local.sh
+
+# Run specific team
+./run_local.sh installers
+./run_local.sh vendex
+./run_local.sh compatibility-matrix
 ```
 
 #### Run for a Specific Product
@@ -87,9 +134,13 @@ This runs the digest for all configured products separately:
 Use the product's shortname:
 
 ```bash
+# Run installers team, KOTS product (default team)
 ./run_product.sh kots
-./run_product.sh kurl
-./run_product.sh ec
+
+# Run specific team and product
+./run_product.sh installers kots
+./run_product.sh vendex vp
+./run_product.sh compatibility-matrix cmx
 ```
 
 Or run directly:
@@ -100,16 +151,23 @@ python3 support_digest.py kots
 
 #### Environment Variables for Local Development
 
-Create a `.env` file based on `env.example`:
+The system uses team-specific environment files for local development. To set up your environment:
 
+1. Copy the example file to your team-specific env file:
 ```bash
-cp env.example .env
+cp env.example .env.installers            # For Installers team
+cp env.example .env.vendex     # For Vendor Experience team
+cp env.example .env.compatibility-matrix  # For Compatibility Matrix team
 ```
 
-Required environment variables:
+2. Edit your `.env.<team>` file to contain your real secrets and webhooks.
+
+**Note**: Each team uses a separate environment file to support different Slack webhooks and configurations. The script automatically detects which team you're running and loads the appropriate `.env.<team>` file.
+
+Required environment variables (for all teams):
 - `GH_TOKEN`: GitHub Personal Access Token with org access
 - `OPENAI_API_KEY`: OpenAI API key for generating summaries
-- `SLACK_WEBHOOK_URL`: Slack webhook URL for posting results
+- `SLACK_WEBHOOK_URL`: Team's Slack webhook URL
 
 Optional environment variables:
 - `HOURS_BACK`: Time window to look back (overrides config default)
@@ -118,15 +176,20 @@ Optional environment variables:
 ### GitHub Actions (Production)
 
 The digest runs automatically via GitHub Actions:
-- **Schedule**: Daily at 7:00 PM UTC (configurable via `github_action_schedule`)
 - **Manual**: Can be triggered manually via workflow dispatch with optional product selection
 
 #### GitHub Secrets Required
 
-In your repository's Settings → Secrets and variables → Actions, add:
+Each team workflow requires these secrets in your repository's Settings → Secrets and variables → Actions:
+
+**All Teams:**
 - `GH_TOKEN`: GitHub Personal Access Token
 - `OPENAI_API_KEY`: OpenAI API key
-- `SLACK_WEBHOOK_URL`: Slack webhook URL
+
+**Team-Specific Webhooks:**
+- `SLACK_WEBHOOK_INSTALLERS`: Installers team webhook
+- `SLACK_WEBHOOK_VENDEX`: Vendor Experience team webhook  
+- `SLACK_WEBHOOK_CMX`: Compatibility Matrix team webhook
 
 #### Manual Workflow Dispatch
 

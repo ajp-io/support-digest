@@ -1,0 +1,23 @@
+{
+  "organizations": {
+    "replicated-collab": {
+      "name": "Replicated Collab",
+      "products": {
+        "product::compatibility-matrix": {
+          "name": "Compatibility Matrix",
+          "shortname": "cmx",
+          "github_org": "replicated-collab",
+          "issue_labels": [
+            "kind::inbound-escalation"
+          ]
+        }
+      }
+    }
+  },
+  "defaults": {
+    "hours_back": 24,
+    "timezone": "America/New_York",
+    "max_workers": 10,
+    "openai_model": "gpt-4o-mini"
+  }
+}

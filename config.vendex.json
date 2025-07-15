@@ -1,0 +1,47 @@
+{
+  "organizations": {
+    "replicated-collab": {
+      "name": "Replicated Collab",
+      "products": {
+        "product::vendor": {
+          "name": "Vendor Portal",
+          "shortname": "vp",
+          "github_org": "replicated-collab",
+          "issue_labels": [
+            "kind::inbound-escalation"
+          ]
+        },
+        "product::sdk": {
+          "name": "Replicated SDK",
+          "shortname": "sdk",
+          "github_org": "replicated-collab",
+          "issue_labels": [
+            "kind::inbound-escalation"
+          ]
+        },
+        "product::helm-cli": {
+          "name": "Helm CLI",
+          "shortname": "helm",
+          "github_org": "replicated-collab",
+          "issue_labels": [
+            "kind::inbound-escalation"
+          ]
+        },
+        "product::downloadportal": {
+          "name": "Download Portal",
+          "shortname": "dp",
+          "github_org": "replicated-collab",
+          "issue_labels": [
+            "kind::inbound-escalation"
+          ]
+        }
+      }
+    }
+  },
+  "defaults": {
+    "hours_back": 24,
+    "timezone": "America/New_York",
+    "max_workers": 10,
+    "openai_model": "gpt-4o-mini"
+  }
+}

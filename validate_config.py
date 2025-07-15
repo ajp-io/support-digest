@@ -1,26 +1,46 @@
 #!/usr/bin/env python3
 """
 Configuration validation script for support digest.
-Run this to validate your config.json before running the main script.
+Run this to validate your team-specific config files before running the main script.
 """
 
 import json
 import sys
 import os
+import argparse
+import glob
 from zoneinfo import ZoneInfo
 
-# Load environment variables from .env file
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    # dotenv not installed, continue without it
-    pass
+def load_team_env(team_name):
+    """Load environment variables from team-specific .env file"""
+    try:
+        from dotenv import load_dotenv
+        
+        env_file = f".env.{team_name}"
+        if os.path.exists(env_file):
+            load_dotenv(env_file)
+            print(f"✅ Loaded environment from {env_file}")
+            return True
+        else:
+            print(f"⚠️  Team environment file {env_file} not found")
+            return False
+        
+    except ImportError:
+        print("⚠️  python-dotenv not installed - environment variables may not be loaded")
+        return False
+
+def find_config_for_team(team_name):
+    """Find the config file for a given team"""
+    config_file = f"config.{team_name}.json"
+    if os.path.exists(config_file):
+        return config_file
+    return None
 
 def validate_github_access(config):
     """Validate GitHub access if GH_TOKEN is available"""
     if not os.environ.get("GH_TOKEN"):
         print("  ⚠️  GH_TOKEN not set - skipping GitHub access validation")
+        print("  💡 Set GH_TOKEN in your .env.<team> file")
         return True
     
     try:
@@ -95,7 +115,18 @@ def validate_github_access(config):
         print(f"  ❌ GitHub validation failed: {e}")
         return False
 
-def validate_config(config_path="config.json"):
+def find_available_teams():
+    """Find available teams by looking at config files"""
+    config_files = glob.glob("config.*.json")
+    teams = []
+    for config_file in config_files:
+        # Extract team name from config.team-name.json
+        if config_file.startswith("config.") and config_file.endswith(".json"):
+            team_name = config_file[7:-5]  # Remove "config." and ".json"
+            teams.append(team_name)
+    return sorted(teams)
+
+def validate_config(config_path):
     """Validate the configuration file"""
     print(f"Validating configuration file: {config_path}")
     
@@ -104,7 +135,6 @@ def validate_config(config_path="config.json"):
             config = json.load(f)
     except FileNotFoundError:
         print(f"❌ Configuration file {config_path} not found")
-        print("Please copy config.example.json to config.json and configure it for your team")
         return False
     except json.JSONDecodeError as e:
         print(f"❌ Invalid JSON in configuration file: {e}")
@@ -189,7 +219,6 @@ def validate_config(config_path="config.json"):
         "hours_back": (int, 24),
         "max_workers": (int, 10),
         "openai_model": (str, "gpt-4o-mini"),
-        "github_action_schedule": (str, "0 19 * * *")
     }
     
     for field, (field_type, default_value) in default_fields.items():
@@ -212,12 +241,85 @@ def validate_config(config_path="config.json"):
     
     print("\n🎉 Configuration validation completed successfully!")
     print("\nNext steps:")
-    print("1. Set up your environment variables in .env file")
-    print("2. Test with: DRY_RUN=1 ./run_local.sh")
-    print("3. Run for a specific product: ./run_product.sh <shortname>")
+    print("1. Set up your environment variables in .env.<team> file")
+    print("2. Test with: DRY_RUN=1 ./run_local.sh [team]")
+    print("3. Run for a specific product: ./run_product.sh [team] <shortname>")
+    print("   Examples:")
+    print("     ./run_product.sh kots                    # Run installers team, KOTS product")
+    print("     ./run_product.sh installers kots         # Run installers team, KOTS product")
+    print("     ./run_product.sh vendex vp    # Run vendex team, Vendor Portal product")
     
     return True
 
+def main():
+    parser = argparse.ArgumentParser(
+        description="Validate support digest configuration for a specific team",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s installers
+  %(prog)s compatibility-matrix
+  %(prog)s vendex
+  %(prog)s --list
+        """
+    )
+    
+    parser.add_argument(
+        "team", 
+        nargs="?", 
+        help="Team name to validate (e.g., installers, compatibility-matrix)"
+    )
+    
+    parser.add_argument(
+        "--list", "-l",
+        action="store_true",
+        help="List available teams"
+    )
+    
+    args = parser.parse_args()
+    
+    # List available teams
+    if args.list:
+        teams = find_available_teams()
+        if teams:
+            print("Available teams:")
+            for team in teams:
+                print(f"  {team}")
+        else:
+            print("No teams found (no config.*.json files)")
+        return 0
+    
+    # No team specified - show help and available teams
+    if not args.team:
+        teams = find_available_teams()
+        if teams:
+            print("Available teams:")
+            for team in teams:
+                print(f"  {team}")
+            print(f"\nUsage: {sys.argv[0]} <team>")
+            print(f"       {sys.argv[0]} --list")
+        else:
+            print("❌ No teams found (no config.*.json files)")
+        return 1
+    
+    # Find config file for the team
+    config_file = find_config_for_team(args.team)
+    if not config_file:
+        print(f"❌ No config file found for team '{args.team}'")
+        print(f"💡 Expected: config.{args.team}.json")
+        teams = find_available_teams()
+        if teams:
+            print(f"Available teams: {', '.join(teams)}")
+        return 1
+    
+    # Load team environment
+    if not load_team_env(args.team):
+        print(f"⚠️  Environment file .env.{args.team} not found")
+        print("💡 The script will continue but GitHub validation may fail")
+    
+    # Validate the config file
+    success = validate_config(config_file)
+    return 0 if success else 1
+
 if __name__ == "__main__":
-    success = validate_config()
-    sys.exit(0 if success else 1) 
+    sys.exit(main()) 

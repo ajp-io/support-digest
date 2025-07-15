@@ -7,25 +7,33 @@
           "name": "Embedded Cluster",
           "shortname": "ec",
           "github_org": "replicated-collab",
-          "issue_labels": ["kind::inbound-escalation"]
+          "issue_labels": [
+            "kind::inbound-escalation"
+          ]
         },
         "product::kots": {
           "name": "KOTS",
           "shortname": "kots",
-          "github_org": "replicated-collab", 
-          "issue_labels": ["kind::inbound-escalation"]
+          "github_org": "replicated-collab",
+          "issue_labels": [
+            "kind::inbound-escalation"
+          ]
         },
         "product::kurl": {
           "name": "kURL",
           "shortname": "kurl",
           "github_org": "replicated-collab",
-          "issue_labels": ["kind::inbound-escalation"]
+          "issue_labels": [
+            "kind::inbound-escalation"
+          ]
         },
         "product::troubleshoot": {
           "name": "Troubleshoot",
           "shortname": "troubleshoot",
           "github_org": "replicated-collab",
-          "issue_labels": ["kind::inbound-escalation"]
+          "issue_labels": [
+            "kind::inbound-escalation"
+          ]
         }
       }
     }
@@ -34,7 +42,6 @@
     "hours_back": 24,
     "timezone": "America/New_York",
     "max_workers": 10,
-    "openai_model": "gpt-4o-mini",
-    "github_action_schedule": "0 19 * * *"
+    "openai_model": "gpt-4o-mini"
   }
-} 
+}

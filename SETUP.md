@@ -1,8 +1,45 @@
-# Quick Setup Guide for Teams
+# Support Digest Setup Guide
 
 This guide will help you set up the support digest script for your team's products.
 
-## Step 1: Clone and Configure
+## Overview
+
+The support digest system uses a team-based approach where each team has:
+- **Separate configuration file** (e.g., `config.installers.json`)
+- **Separate GitHub Actions workflow** (e.g., `support-digest-installers.yaml`)
+- **Separate Slack webhook** (stored as GitHub secret)
+
+### Benefits
+
+✅ **Complete isolation** - Teams don't interfere with each other
+✅ **Flexibility** - Each team can customize their setup independently  
+✅ **Security** - Each team manages their own secrets
+✅ **Reliability** - If one team's config breaks, others keep running
+✅ **Maintainability** - Easy to add new teams without code changes
+
+## Team Configurations
+
+### Installers Team
+- **Config**: `config.installers.json`
+- **Workflow**: `support-digest-installers.yaml`
+- **Webhook Secret**: `SLACK_WEBHOOK_INSTALLERS`
+- **Products**: KOTS, kURL, Embedded Cluster, Troubleshoot
+
+### Vendor Experience Team  
+- **Config**: `config.vendex.json`
+- **Workflow**: `support-digest-vendex.yaml`
+- **Webhook Secret**: `SLACK_WEBHOOK_VENDEX`
+- **Products**: Vendor Portal, Replicated SDK, Helm CLI, Download Portal
+
+### Compatibility Matrix Team
+- **Config**: `config.cmx.json`
+- **Workflow**: `support-digest-cmx.yaml`
+- **Webhook Secret**: `SLACK_WEBHOOK_CMX`
+- **Products**: Compatibility Matrix
+
+## Local Development Setup
+
+### Step 1: Clone and Configure
 
 1. Clone this repository:
    ```bash
@@ -12,12 +49,22 @@ This guide will help you set up the support digest script for your team's produc
 
    **Note:** Replace `<your-repository-url>` with the URL of your fork of this repository.
 
-2. Copy the example configuration:
+2. Validate your team's configuration:
    ```bash
-   cp config.example.json config.json
+   # Validate installers team configuration
+   python3 validate_config.py installers
+   
+   # Validate vendex team configuration
+   python3 validate_config.py vendex
+   
+   # Validate compatibility-matrix team configuration
+   python3 validate_config.py cmx
+   
+   # List all available teams
+   python3 validate_config.py --list
    ```
 
-3. Edit `config.json` to add your organization and products:
+3. Edit your team's config file to add your organization and products:
    ```json
    {
      "organizations": {
@@ -37,18 +84,23 @@ This guide will help you set up the support digest script for your team's produc
        "hours_back": 24,
        "timezone": "America/New_York",
        "max_workers": 10,
-       "openai_model": "gpt-4o-mini",
-       "max_tokens": 1000
+       "openai_model": "gpt-4o-mini"
      }
    }
    ```
 
-## Step 2: Validate Configuration
+### Step 2: Validate Configuration
 
-Run the validation script to check your configuration:
+Run the validation script to check your team's configuration:
 
 ```bash
-python3 validate_config.py
+# Validate a specific team
+python3 validate_config.py installers
+python3 validate_config.py vendex
+python3 validate_config.py cmx
+
+# List available teams
+python3 validate_config.py --list
 ```
 
 This will verify:
@@ -61,14 +113,21 @@ This will verify:
 
 The validation script provides detailed feedback about any issues found and suggestions for fixing them.
 
-## Step 3: Set Up Environment Variables
+### Step 3: Set Up Environment Variables
 
-1. Copy the example environment file:
+1. Copy the example environment file for your team:
    ```bash
-   cp env.example .env
+   # For Installers team
+   cp env.example .env.installers
+   
+   # For Vendor Experience team
+   cp env.example .env.vendex
+   
+   # For Compatibility Matrix team
+   cp env.example .env.cmx
    ```
 
-2. Edit `.env` with your credentials:
+2. Edit your team's `.env.<team>` file with your credentials:
    ```bash
    # GitHub Personal Access Token (needs repo access for your configured organizations)
    GH_TOKEN=your_github_pat_here
@@ -80,44 +139,89 @@ The validation script provides detailed feedback about any issues found and sugg
    SLACK_WEBHOOK_URL=your_slack_webhook_url_here
    ```
 
-## Step 4: Install Dependencies
+### Step 4: Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Step 5: Test Your Setup
+### Step 5: Test Your Setup
 
 1. Test with dry run mode:
    ```bash
+   # Test Installers team (default)
    DRY_RUN=1 ./run_local.sh
+   
+   # Test specific team
+   DRY_RUN=1 ./run_local.sh vendex
+   DRY_RUN=1 ./run_local.sh cmx
    ```
 
 2. Test a specific product:
    ```bash
+   # Installers team products
    ./run_product.sh kots
    ./run_product.sh ec
    ./run_product.sh kurl
    ./run_product.sh troubleshoot
+   
+   # Vendor Experience team products
+   ./run_product.sh vendex vp
+   ./run_product.sh vendex sdk
+   
+   # Compatibility Matrix team products
+   ./run_product.sh cmx cmx
    ```
    Or directly:
    ```bash
    python3 support_digest.py kots
    ```
 
-## Step 6: Run for Real
+### Step 6: Run for Real
 
 Once you're satisfied with the test output:
 
 ```bash
-# Run for all products
+# Run for all products (defaults to installers team)
 ./run_local.sh
 
+# Run for specific team
+./run_local.sh vendex
+./run_local.sh cmx
+
 # Run for a specific product
-./run_product.sh yourproduct
+./run_product.sh kots        # Installers team, KOTS product
+./run_product.sh vendex vp   # Vendex team, Vendor Portal product
+./run_product.sh cmx cmx     # Compatibility Matrix team, Compatibility Matrix product
 ```
 
-Replace `yourproduct` with the shortname you defined in your configuration.
+Replace the team and product names with your specific configuration.
+
+## GitHub Actions Setup (Production)
+
+### GitHub Secrets Required
+
+Add these secrets to your repository (Settings → Secrets and variables → Actions):
+
+**Required for All Teams:**
+- `GH_TOKEN`: GitHub Personal Access Token
+- `OPENAI_API_KEY`: OpenAI API key
+
+**Team-Specific Webhooks:**
+- `SLACK_WEBHOOK_INSTALLERS`: Installers team webhook
+- `SLACK_WEBHOOK_VENDEX`: Vendor Experience team webhook  
+- `SLACK_WEBHOOK_CMX`: Compatibility Matrix team webhook
+
+### Workflow Schedules
+
+All workflows run daily at 7:00 PM UTC, but each can be:
+- **Manually triggered** with optional product selection
+- **Independently scheduled** (if teams want different times)
+- **Independently disabled** (if a team needs to pause)
+
+### Manual Workflow Dispatch
+
+When manually triggering the workflow, you can optionally specify a product shortname to run for just that product.
 
 ## Configuration Options
 
@@ -163,11 +267,39 @@ Choose which OpenAI model to use for summarization:
 "openai_model": "gpt-4o-mini"
 ```
 
+## Adding New Teams
+
+To add a new team:
+
+1. **Create config file**: `config.new-team.json`
+2. **Create workflow**: `support-digest-new-team.yaml`
+3. **Add webhook secret**: `SLACK_WEBHOOK_NEW_TEAM`
+4. **Update documentation**
+
+## Testing
+
+Test individual teams using the unified scripts:
+
+```bash
+# Test Installers team (default)
+./run_local.sh                    # All installers products
+./run_product.sh kots             # Just KOTS
+./run_product.sh installers kots  # Explicit installers team
+
+# Test Vendex team
+./run_local.sh vendex       # All vendex products
+./run_product.sh vendex vp  # Just Vendor Portal
+
+# Test Compatibility Matrix team
+./run_local.sh cmx        # All compatibility matrix products
+./run_product.sh cmx cmx  # Just Compatibility Matrix
+```
+
 ## Troubleshooting
 
 ### Configuration Issues
 
-- Run `python3 validate_config.py` to check for configuration errors
+- Run `python3 validate_config.py <team>` to check for configuration errors
 - Ensure all required fields are present in your product configuration
 - Check that your GitHub organization name matches exactly
 
@@ -188,5 +320,5 @@ If you encounter issues:
 
 1. Check the debug output for error messages
 2. Run with `DRY_RUN=1` to see what would be processed without sending to Slack
-3. Validate your configuration with `python3 validate_config.py`
+3. Validate your configuration with `python3 validate_config.py <team>`
 4. Check the main README.md for more detailed documentation 
