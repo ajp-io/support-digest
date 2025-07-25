@@ -132,8 +132,14 @@ def gather_deltas(gh, since, product_label):
         return []
     
     org_name = product_info["org_name"]
+    org_config = product_info["org_config"]
     product_config = product_info["product_config"]
     additional_labels = product_config.get("issue_labels", [])
+    
+    # Get excluded repositories
+    excluded_repos = org_config.get("excluded_repos", [])
+    if excluded_repos:
+        print(f"[DEBUG] Excluding repositories: {excluded_repos}")
     
     # Always include the product-specific label (from the config key)
     all_labels = [product_label] + additional_labels
@@ -153,13 +159,17 @@ def gather_deltas(gh, since, product_label):
     created_issues = list(gh.search_issues(created_query, sort="created", order="desc"))
     updated_issues = list(gh.search_issues(updated_query, sort="updated", order="desc"))
     
-    # Combine and deduplicate issues
+    # Combine and deduplicate issues, filtering out excluded repositories
     all_issues = {}
     for issue in created_issues + updated_issues:
-        all_issues[f"{issue.repository.name}#{issue.number}"] = issue
+        repo_name = issue.repository.name
+        if repo_name not in excluded_repos:
+            all_issues[f"{repo_name}#{issue.number}"] = issue
+        else:
+            print(f"[DEBUG] Skipping excluded repository: {repo_name}")
     
     issues_list = list(all_issues.values())
-    print(f"[DEBUG] Found {len(issues_list)} candidate issues for {product_label}")
+    print(f"[DEBUG] Found {len(issues_list)} candidate issues for {product_label} (after excluding {len(excluded_repos)} repositories)")
     
     if not issues_list:
         return []
@@ -467,8 +477,31 @@ def run_for_product(product_label_or_shortname):
     else:
         print(f"[DEBUG] No deltas to report for {product_label}.")
 
+def load_team_env():
+    """Load environment variables from team-specific .env file"""
+    try:
+        config_file = os.environ.get("CONFIG_FILE", "config.installers.json")
+        # Extract team name from config file (e.g., "config.installers.json" -> "installers")
+        team_name = config_file.replace("config.", "").replace(".json", "")
+        
+        env_file = f".env.{team_name}"
+        if os.path.exists(env_file):
+            load_dotenv(env_file)
+            print(f"[DEBUG] Loaded environment from {env_file}")
+            return True
+        else:
+            print(f"[DEBUG] Team environment file {env_file} not found")
+            return False
+        
+    except ImportError:
+        print("[DEBUG] python-dotenv not installed - environment variables may not be loaded")
+        return False
+
 def main():
     print("[DEBUG] Starting support digest script")
+    
+    # Load team-specific environment
+    load_team_env()
     
     # Load .env file only if no team-specific environment is set
     config_file = os.environ.get("CONFIG_FILE", "config.installers.json")

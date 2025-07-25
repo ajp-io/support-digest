@@ -2,6 +2,9 @@
   "organizations": {
     "replicated-collab": {
       "name": "Replicated Collab",
+      "excluded_repos": [
+        "superci-replicated"
+      ],
       "products": {
         "product::compatibility-matrix": {
           "name": "Compatibility Matrix",

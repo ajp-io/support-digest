@@ -63,6 +63,7 @@ The script is fully configurable through a team-specific JSON configuration file
 
 #### Organization
 - `name`: Display name for the organization
+- `excluded_repos`: Array of repository names to exclude from processing (optional)
 
 #### Product
 - `name`: Name for the product (used for display)

@@ -241,6 +241,29 @@ This will only include issues that have ALL the specified labels:
 
 You can customize this array based on your team's labeling conventions. For example, some teams use `support` or `escalation` instead of `kind::inbound-escalation`. The validation script will check that all specified labels exist in your repositories.
 
+### Repository Exclusion
+
+You can exclude specific repositories from being processed by adding an `excluded_repos` array to the organization configuration:
+
+```json
+{
+  "organizations": {
+    "your-org-name": {
+      "name": "Your Organization Name",
+      "excluded_repos": [
+        "repo-to-exclude",
+        "another-repo-to-exclude"
+      ],
+      "products": {
+        // ... products ...
+      }
+    }
+  }
+}
+```
+
+This is useful for excluding repositories that don't contain support-related issues or are not relevant to your team's scope. The system will log which repositories are being excluded for transparency.
+
 ### Timezone
 
 Set your preferred timezone for displaying timestamps:
